@@ -37,9 +37,6 @@
 /** Natural order in constant memory */
 __constant__ int gpujpeg_huffman_gpu_encoder_order_natural[GPUJPEG_ORDER_NATURAL_SIZE];
 
-/** Allocate huffman tables in constant memory */
-__device__ struct gpujpeg_table_huffman_encoder gpujpeg_huffman_gpu_encoder_table_huffman[GPUJPEG_COMPONENT_TYPE_COUNT][GPUJPEG_HUFFMAN_TYPE_COUNT];
-
 struct gpujpeg_huffman_gpu_encoder
 {
     /**
@@ -57,6 +54,10 @@ struct gpujpeg_huffman_gpu_encoder
      * Mapping from coefficient value into the code for the value ind its bit size.
      */
     unsigned int *d_value_decomposition;
+
+    /** Allocate huffman tables in constant memory */
+    struct gpujpeg_table_huffman_encoder (*d_table_huffman)[GPUJPEG_HUFFMAN_TYPE_COUNT];
+
 
     /** Size of occupied part of output buffer */
     unsigned int * d_gpujpeg_huffman_output_byte_count;
@@ -836,7 +837,7 @@ gpujpeg_huffman_encoder_encode_kernel(
     int comp_count,
     int segment_count,
     uint8_t* d_data_compressed,
-    unsigned int * d_gpujpeg_huffman_output_byte_count
+    struct gpujpeg_huffman_gpu_encoder encoder
 )
 {
     int segment_index = blockIdx.x * blockDim.x + threadIdx.x;
@@ -847,7 +848,7 @@ gpujpeg_huffman_encoder_encode_kernel(
 
     // first thread initializes compact output size for next kernel
     if(0 == segment_index) {
-        *d_gpujpeg_huffman_output_byte_count = 0;
+        *encoder.d_gpujpeg_huffman_output_byte_count = 0;
     }
 
     // Initialize huffman coder
@@ -879,11 +880,11 @@ gpujpeg_huffman_encoder_encode_kernel(
             struct gpujpeg_table_huffman_encoder* d_table_dc = NULL;
             struct gpujpeg_table_huffman_encoder* d_table_ac = NULL;
             if ( component->type == GPUJPEG_COMPONENT_LUMINANCE ) {
-                d_table_dc = &gpujpeg_huffman_gpu_encoder_table_huffman[GPUJPEG_COMPONENT_LUMINANCE][GPUJPEG_HUFFMAN_DC];
-                d_table_ac = &gpujpeg_huffman_gpu_encoder_table_huffman[GPUJPEG_COMPONENT_LUMINANCE][GPUJPEG_HUFFMAN_AC];
+                d_table_dc = &encoder.d_table_huffman[GPUJPEG_COMPONENT_LUMINANCE][GPUJPEG_HUFFMAN_DC];
+                d_table_ac = &encoder.d_table_huffman[GPUJPEG_COMPONENT_LUMINANCE][GPUJPEG_HUFFMAN_AC];
             } else {
-                d_table_dc = &gpujpeg_huffman_gpu_encoder_table_huffman[GPUJPEG_COMPONENT_CHROMINANCE][GPUJPEG_HUFFMAN_DC];
-                d_table_ac = &gpujpeg_huffman_gpu_encoder_table_huffman[GPUJPEG_COMPONENT_CHROMINANCE][GPUJPEG_HUFFMAN_AC];
+                d_table_dc = &encoder.d_table_huffman[GPUJPEG_COMPONENT_CHROMINANCE][GPUJPEG_HUFFMAN_DC];
+                d_table_ac = &encoder.d_table_huffman[GPUJPEG_COMPONENT_CHROMINANCE][GPUJPEG_HUFFMAN_AC];
             }
 
             // Encode 8x8 block
@@ -925,11 +926,11 @@ gpujpeg_huffman_encoder_encode_kernel(
                         struct gpujpeg_table_huffman_encoder* d_table_dc = NULL;
                         struct gpujpeg_table_huffman_encoder* d_table_ac = NULL;
                         if ( component->type == GPUJPEG_COMPONENT_LUMINANCE ) {
-                            d_table_dc = &gpujpeg_huffman_gpu_encoder_table_huffman[GPUJPEG_COMPONENT_LUMINANCE][GPUJPEG_HUFFMAN_DC];
-                            d_table_ac = &gpujpeg_huffman_gpu_encoder_table_huffman[GPUJPEG_COMPONENT_LUMINANCE][GPUJPEG_HUFFMAN_AC];
+                            d_table_dc = &encoder.d_table_huffman[GPUJPEG_COMPONENT_LUMINANCE][GPUJPEG_HUFFMAN_DC];
+                            d_table_ac = &encoder.d_table_huffman[GPUJPEG_COMPONENT_LUMINANCE][GPUJPEG_HUFFMAN_AC];
                         } else {
-                            d_table_dc = &gpujpeg_huffman_gpu_encoder_table_huffman[GPUJPEG_COMPONENT_CHROMINANCE][GPUJPEG_HUFFMAN_DC];
-                            d_table_ac = &gpujpeg_huffman_gpu_encoder_table_huffman[GPUJPEG_COMPONENT_CHROMINANCE][GPUJPEG_HUFFMAN_AC];
+                            d_table_dc = &encoder.d_table_huffman[GPUJPEG_COMPONENT_CHROMINANCE][GPUJPEG_HUFFMAN_DC];
+                            d_table_ac = &encoder.d_table_huffman[GPUJPEG_COMPONENT_CHROMINANCE][GPUJPEG_HUFFMAN_AC];
                         }
 
                         // Encode 8x8 block
@@ -1001,13 +1002,10 @@ gpujpeg_huffman_gpu_encoder_create(const struct gpujpeg_encoder * encoder)
     gpujpeg_cuda_check_error("Huffman encoder init (Huffman LUT copy)", return NULL);
 
     // Copy original Huffman coding tables to GPU memory (for CC 1.x)
-    cudaMemcpyToSymbol(
-        gpujpeg_huffman_gpu_encoder_table_huffman,
-        &encoder->table_huffman[GPUJPEG_COMPONENT_LUMINANCE][GPUJPEG_HUFFMAN_DC],
-        sizeof(gpujpeg_huffman_gpu_encoder_table_huffman),
-        0,
-        cudaMemcpyHostToDevice
-    );
+    cudaMalloc((void **) &huffman_gpu_encoder->d_table_huffman, sizeof huffman_gpu_encoder->d_table_huffman * GPUJPEG_COMPONENT_TYPE_COUNT);
+    gpujpeg_cuda_check_error("Huffman encoder init (Huffman coding table alloc)", return NULL);
+    cudaMemcpy(huffman_gpu_encoder->d_table_huffman, &encoder->table_huffman[GPUJPEG_COMPONENT_LUMINANCE][GPUJPEG_HUFFMAN_DC],
+            sizeof huffman_gpu_encoder->d_table_huffman * GPUJPEG_COMPONENT_TYPE_COUNT, cudaMemcpyDefault);
     gpujpeg_cuda_check_error("Huffman encoder init (Huffman coding table)", return NULL);
 
     // Copy natural order to constant device memory
@@ -1038,6 +1036,7 @@ gpujpeg_huffman_gpu_encoder_destroy(struct gpujpeg_huffman_gpu_encoder * huffman
 
     cudaFree(huffman_gpu_encoder->d_lut);
     cudaFree(huffman_gpu_encoder->d_value_decomposition);
+    cudaFree(huffman_gpu_encoder->d_table_huffman);
     if (huffman_gpu_encoder->d_gpujpeg_huffman_output_byte_count != NULL) {
         cudaFree(huffman_gpu_encoder->d_gpujpeg_huffman_output_byte_count);
     }
@@ -1088,7 +1087,7 @@ gpujpeg_huffman_gpu_encoder_encode(struct gpujpeg_encoder* encoder, struct gpujp
             comp_count,
             coder->segment_count,
             coder->d_temp_huffman,
-            huffman_gpu_encoder->d_gpujpeg_huffman_output_byte_count
+            *huffman_gpu_encoder
         );
         gpujpeg_cuda_check_error("Huffman encoding failed", return -1);
     } else {
