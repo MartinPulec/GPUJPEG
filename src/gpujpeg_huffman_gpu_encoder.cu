@@ -37,12 +37,6 @@
 /** Natural order in constant memory */
 __constant__ int gpujpeg_huffman_gpu_encoder_order_natural[GPUJPEG_ORDER_NATURAL_SIZE];
 
-/**
- * Value decomposition in constant memory (input range from -4096 to 4095  ... both inclusive)
- * Mapping from coefficient value into the code for the value ind its bit size.
- */
-__device__ unsigned int gpujpeg_huffman_value_decomposition[8 * 1024];
-
 /** Allocate huffman tables in constant memory */
 __device__ struct gpujpeg_table_huffman_encoder gpujpeg_huffman_gpu_encoder_table_huffman[GPUJPEG_COMPONENT_TYPE_COUNT][GPUJPEG_HUFFMAN_TYPE_COUNT];
 
@@ -58,6 +52,12 @@ struct gpujpeg_huffman_gpu_encoder
      */
     uint32_t *d_lut;
 
+    /**
+     * Value decomposition in constant memory (input range from -4096 to 4095  ... both inclusive)
+     * Mapping from coefficient value into the code for the value ind its bit size.
+     */
+    unsigned int *d_value_decomposition;
+
     /** Size of occupied part of output buffer */
     unsigned int * d_gpujpeg_huffman_output_byte_count;
 };
@@ -67,7 +67,7 @@ struct gpujpeg_huffman_gpu_encoder
  * Output table is a mapping from some value into its code and bit size.
  */
 __global__ static void
-gpujpeg_huffman_gpu_encoder_value_decomposition_init_kernel() {
+gpujpeg_huffman_gpu_encoder_value_decomposition_init_kernel(unsigned int *gpujpeg_huffman_value_decomposition) {
     // fetch some value
     const int tid = threadIdx.x + blockIdx.x * blockDim.x;
     const int value = tid - 4096;
@@ -137,10 +137,10 @@ gpujpeg_huffman_gpu_encoder_emit_bits(unsigned int & remaining_bits, int & byte_
  */
 __device__ static unsigned int
 gpujpeg_huffman_gpu_encode_value(const int preceding_zero_count, const int coefficient,
-                                 const int huffman_lut_offset, const uint32_t *lut)
+                                 const int huffman_lut_offset, struct gpujpeg_huffman_gpu_encoder encoder)
 {
     // value bits are in MSBs (left aligned) and bit size of the value is in LSBs (right aligned)
-    const unsigned int packed_value = gpujpeg_huffman_value_decomposition[4096 + coefficient];
+    const unsigned int packed_value = encoder.d_value_decomposition[4096 + coefficient];
 
     // decompose value info into upshifted value and value's bit size
     const int value_nbits = packed_value & 0xf;
@@ -148,7 +148,7 @@ gpujpeg_huffman_gpu_encode_value(const int preceding_zero_count, const int coeff
 
     // find prefix of the codeword and size of the prefix
     const int huffman_lut_idx = huffman_lut_offset + preceding_zero_count * 16 + value_nbits;
-    const unsigned int packed_prefix = lut[huffman_lut_idx];
+    const unsigned int packed_prefix = encoder.d_lut[huffman_lut_idx];
     const unsigned int prefix_nbits = packed_prefix & 31;
 
     // compose packed codeword with its size
@@ -190,7 +190,7 @@ gpujpeg_huffman_gpu_encoder_flush_codewords(unsigned int * const s_out, unsigned
  */
 __device__ static int
 gpujpeg_huffman_gpu_encoder_encode_block(const int16_t * block, unsigned int * &data_compressed, unsigned int * const s_out,
-                int & remaining_codewords, const int last_dc_idx, int tid, const int huffman_lut_offset, const uint32_t *lut)
+                int & remaining_codewords, const int last_dc_idx, int tid, const int huffman_lut_offset, struct gpujpeg_huffman_gpu_encoder encoder)
 {
     // each thread loads a pair of values (pair after zigzag reordering)
     const int load_idx = tid * 2;
@@ -245,8 +245,8 @@ gpujpeg_huffman_gpu_encoder_encode_block(const int16_t * block, unsigned int * &
     }
 
     // each thread gets codeword for its two pixels
-    unsigned int even_code = gpujpeg_huffman_gpu_encode_value(zeros_before_even, in_even, even_lut_offset, lut);
-    unsigned int odd_code = gpujpeg_huffman_gpu_encode_value(zeros_before_odd, in_odd, huffman_lut_offset, lut);
+    unsigned int even_code = gpujpeg_huffman_gpu_encode_value(zeros_before_even, in_even, even_lut_offset, encoder);
+    unsigned int odd_code = gpujpeg_huffman_gpu_encode_value(zeros_before_odd, in_odd, huffman_lut_offset, encoder);
 
     // concatenate both codewords into one if they are short enough
     const unsigned int even_code_size = even_code & 31;
@@ -364,7 +364,7 @@ gpujpeg_huffman_encoder_encode_kernel_warp(
         // Encode MCUs in segment
         for (int block_count = segment->mcu_count; block_count--;) {
             // Encode 8x8 block
-            gpujpeg_huffman_gpu_encoder_encode_block(block, data_compressed, s_out, remaining_codewords, 256, tid, huffman_table_offset, encoder.d_lut);
+            gpujpeg_huffman_gpu_encoder_encode_block(block, data_compressed, s_out, remaining_codewords, 256, tid, huffman_table_offset, encoder);
 
             // Advance to next block
             block += comp_mcu_size;
@@ -388,7 +388,7 @@ gpujpeg_huffman_encoder_encode_kernel_warp(
             int16_t* block = &d_data_quantized[packed_block_info >> 8];
 
             // Encode 8x8 block
-            gpujpeg_huffman_gpu_encoder_encode_block(block, data_compressed, s_out, remaining_codewords, last_dc_idx, tid, huffman_table_offset, encoder.d_lut);
+            gpujpeg_huffman_gpu_encoder_encode_block(block, data_compressed, s_out, remaining_codewords, last_dc_idx, tid, huffman_table_offset, encoder);
         }
     }
 
@@ -982,8 +982,10 @@ gpujpeg_huffman_gpu_encoder_create(const struct gpujpeg_encoder * encoder)
     gpujpeg_cuda_check_error("Allocation of huffman output byte count failed", return NULL);
 
     // Initialize decomposition lookup table
+    cudaMalloc((void **) &huffman_gpu_encoder->d_value_decomposition, 8 * 1024 * sizeof(int));
+    gpujpeg_cuda_check_error("Huffman encoder init (value_decomposition alloc)", return NULL);
     cudaFuncSetCacheConfig(gpujpeg_huffman_gpu_encoder_value_decomposition_init_kernel, cudaFuncCachePreferShared);
-    gpujpeg_huffman_gpu_encoder_value_decomposition_init_kernel<<<32, 256>>>();  // 8192 threads total
+    gpujpeg_huffman_gpu_encoder_value_decomposition_init_kernel<<<32, 256>>>(huffman_gpu_encoder->d_value_decomposition);  // 8192 threads total
     cudaDeviceSynchronize();
     gpujpeg_cuda_check_error("Decomposition LUT initialization failed", return NULL);
 
@@ -1035,6 +1037,7 @@ gpujpeg_huffman_gpu_encoder_destroy(struct gpujpeg_huffman_gpu_encoder * huffman
     assert(huffman_gpu_encoder != NULL);
 
     cudaFree(huffman_gpu_encoder->d_lut);
+    cudaFree(huffman_gpu_encoder->d_value_decomposition);
     if (huffman_gpu_encoder->d_gpujpeg_huffman_output_byte_count != NULL) {
         cudaFree(huffman_gpu_encoder->d_gpujpeg_huffman_output_byte_count);
     }
