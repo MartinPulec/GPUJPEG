@@ -34,11 +34,19 @@
 
 #define WARPS_NUM 8
 
+#ifdef HUFFMAN_GPU_CONST_TABLES
 /** Natural order in constant memory */
 __constant__ int gpujpeg_huffman_gpu_encoder_order_natural[GPUJPEG_ORDER_NATURAL_SIZE];
+#else
+#define gpujpeg_huffman_gpu_encoder_order_natural (encoder.d_order_natural)
+#endif
 
 struct gpujpeg_huffman_gpu_encoder
 {
+#ifndef HUFFMAN_GPU_CONST_TABLES
+/** Natural order in constant memory */
+    int *d_order_natural;
+#endif
     /**
      * Huffman coding tables in constant memory - each has 257 items (256 + 1 extra)
      * There are are 4 of them - one after another, in following order:
@@ -730,7 +738,8 @@ gpujpeg_huffman_gpu_encoder_emit_left_bits(int & put_value, int & put_bits, uint
  */
 __device__ static int
 gpujpeg_huffman_gpu_encoder_encode_block(int & put_value, int & put_bits, int & dc, int16_t* data, uint8_t* & data_compressed,
-    struct gpujpeg_table_huffman_encoder* d_table_dc, struct gpujpeg_table_huffman_encoder* d_table_ac)
+    struct gpujpeg_table_huffman_encoder* d_table_dc, struct gpujpeg_table_huffman_encoder* d_table_ac,
+    struct gpujpeg_huffman_gpu_encoder encoder)
 {
     typedef uint64_t loading_t;
     const int loading_iteration_count = 64 * 2 / sizeof(loading_t);
@@ -888,7 +897,7 @@ gpujpeg_huffman_encoder_encode_kernel(
             }
 
             // Encode 8x8 block
-            if ( gpujpeg_huffman_gpu_encoder_encode_block(put_value, put_bits, component_dc, block, data_compressed, d_table_dc, d_table_ac) != 0 )
+            if ( gpujpeg_huffman_gpu_encoder_encode_block(put_value, put_bits, component_dc, block, data_compressed, d_table_dc, d_table_ac, encoder) != 0 )
                 break;
         }
     }
@@ -934,7 +943,7 @@ gpujpeg_huffman_encoder_encode_kernel(
                         }
 
                         // Encode 8x8 block
-                        gpujpeg_huffman_gpu_encoder_encode_block(put_value, put_bits, component_dc, block, data_compressed, d_table_dc, d_table_ac);
+                        gpujpeg_huffman_gpu_encoder_encode_block(put_value, put_bits, component_dc, block, data_compressed, d_table_dc, d_table_ac, encoder);
                     }
                 }
             }
@@ -1009,6 +1018,7 @@ gpujpeg_huffman_gpu_encoder_create(const struct gpujpeg_encoder * encoder)
     gpujpeg_cuda_check_error("Huffman encoder init (Huffman coding table)", return NULL);
 
     // Copy natural order to constant device memory
+#ifdef HUFFMAN_GPU_CONST_TABLES
     cudaMemcpyToSymbol(
         gpujpeg_huffman_gpu_encoder_order_natural,
         gpujpeg_order_natural,
@@ -1016,7 +1026,13 @@ gpujpeg_huffman_gpu_encoder_create(const struct gpujpeg_encoder * encoder)
         0,
         cudaMemcpyHostToDevice
     );
+#else
+    cudaMalloc((void **) &huffman_gpu_encoder->d_order_natural, sizeof gpujpeg_order_natural);
+    gpujpeg_cuda_check_error("Huffman encoder init (Huffman coding table alloc)", return NULL);
+    cudaMemcpy(huffman_gpu_encoder->d_order_natural, gpujpeg_order_natural,
+            sizeof gpujpeg_order_natural, cudaMemcpyDefault);
     gpujpeg_cuda_check_error("Huffman encoder init (natural order copy)", return NULL);
+#endif
 
     // Configure more shared memory for all kernels
     cudaFuncSetCacheConfig(gpujpeg_huffman_encoder_encode_kernel_warp<true>, cudaFuncCachePreferShared);
@@ -1034,6 +1050,9 @@ gpujpeg_huffman_gpu_encoder_destroy(struct gpujpeg_huffman_gpu_encoder * huffman
 {
     assert(huffman_gpu_encoder != NULL);
 
+#ifndef HUFFMAN_GPU_CONST_TABLES
+    cudaFree(huffman_gpu_encoder->d_order_natural);
+#endif
     cudaFree(huffman_gpu_encoder->d_lut);
     cudaFree(huffman_gpu_encoder->d_value_decomposition);
     cudaFree(huffman_gpu_encoder->d_table_huffman);
