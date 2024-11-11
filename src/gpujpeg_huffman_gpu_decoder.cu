@@ -471,7 +471,7 @@ gpujpeg_huffman_gpu_decoder_decode(struct gpujpeg_decoder* decoder)
         ,decoder->d_table_huffman[GPUJPEG_COMPONENT_CHROMINANCE][GPUJPEG_HUFFMAN_AC]
     #endif
     );
-    cudaError cuerr = cudaThreadSynchronize();
+    // cudaError cuerr = cudaThreadSynchronize();
     gpujpeg_cuda_check_error("Huffman decoding failed", return -1);
     
     return 0;
