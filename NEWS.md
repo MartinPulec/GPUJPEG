@@ -1,3 +1,11 @@
+2026-09-23 - 0.27.14
+----------
+
+- add encoder option GPUJPEG_ENC_OPT_HUFF_OPTIMAL to generate
+optimal Huffman tables. This reduces compressed size by some
+10-25% in case of images with many restart intervals as generated
+by GPUJPEG by default
+
 2026-03-19 - 0.27.13
 ----------
 
