@@ -1,6 +1,6 @@
 /**
  * @file
- * Copyright (c) 2011-2025, CESNET
+ * Copyright (c) 2011-2026, CESNET
  * Copyright (c) 2011, Silicon Genome, LLC.
  *
  * All rights reserved.
@@ -29,6 +29,7 @@
  */
 
 #include "gpujpeg_huffman_gpu_encoder.h"
+#include "gpujpeg_huffman_optimal_tab_gen_gpu.h"
 #include "gpujpeg_marker.h"
 #include "gpujpeg_util.h"
 
@@ -60,6 +61,8 @@ struct gpujpeg_huffman_gpu_encoder
 {
     /** Size of occupied part of output buffer */
     unsigned int * d_gpujpeg_huffman_output_byte_count;
+
+    struct gpujpeg_huffman_optimal_tab_gen *huffman_optimized;
 };
 
 /**
@@ -1044,6 +1047,8 @@ gpujpeg_huffman_gpu_encoder_destroy(struct gpujpeg_huffman_gpu_encoder * huffman
         cudaFree(huffman_gpu_encoder->d_gpujpeg_huffman_output_byte_count);
     }
 
+    gpujpeg_huffman_optimal_tab_gpu_destroy(huffman_gpu_encoder->huffman_optimized);
+
     free(huffman_gpu_encoder);
 }
 
@@ -1067,6 +1072,38 @@ gpujpeg_huffman_gpu_encoder_grid_size(int tblock_count)
     return size;
 }
 
+static bool
+gen_huff_tables(struct gpujpeg_encoder* encoder, struct gpujpeg_huffman_gpu_encoder* huffman_gpu_encoder)
+{
+    struct gpujpeg_coder* coder = &encoder->coder;
+    if ( huffman_gpu_encoder->huffman_optimized == nullptr ) {
+        huffman_gpu_encoder->huffman_optimized = gpujpeg_huffman_optimal_tab_gpu_create();
+    }
+
+    if ( gpujpeg_huffman_optimal_tab_gpu_generate(encoder, huffman_gpu_encoder->huffman_optimized) != 0 ) {
+        return false;
+    }
+    // Copy Huffman coding tables to GPU memory (for CC 1.x)
+    if ( encoder->coder.cuda_cc_major < 2 ) {
+        cudaMemcpyToSymbolAsync(gpujpeg_huffman_gpu_encoder_table_huffman,
+                                &encoder->table_huffman[GPUJPEG_COMPONENT_LUMINANCE][GPUJPEG_HUFFMAN_DC],
+                                sizeof(gpujpeg_huffman_gpu_encoder_table_huffman), 0, cudaMemcpyHostToDevice,
+                                coder->stream);
+    } else {
+        // compose GPU version of the huffman LUT and copy it into GPU memory (for CC >= 2.0)
+        uint32_t gpujpeg_huffman_cpu_lut[(256 + 1) * 4];
+        for ( int i = 0; i < 4; i++ ) {
+            gpujpeg_huffman_gpu_add_packed_table(gpujpeg_huffman_cpu_lut + 257 * i,
+                                                 &encoder->table_huffman[i / 2][(i + 1) % 2], (i + 1) % 2);
+        }
+        cudaMemcpyToSymbolAsync(gpujpeg_huffman_gpu_lut, gpujpeg_huffman_cpu_lut,
+                                (256 + 1) * 4 * sizeof(*gpujpeg_huffman_gpu_lut), 0, cudaMemcpyHostToDevice,
+                                coder->stream);
+    }
+    gpujpeg_cuda_check_error("Huffman encoder init (Huffman LUT copy)", return false);
+    return true;
+}
+
 /* Documented at declaration */
 int
 gpujpeg_huffman_gpu_encoder_encode(struct gpujpeg_encoder* encoder, struct gpujpeg_huffman_gpu_encoder * huffman_gpu_encoder, unsigned int * output_byte_count)
@@ -1075,6 +1112,12 @@ gpujpeg_huffman_gpu_encoder_encode(struct gpujpeg_encoder* encoder, struct gpujp
     struct gpujpeg_coder* coder = &encoder->coder;
 
     assert(coder->param.restart_interval > 0);
+
+    if ( encoder->optimize_huffman ) {
+        if (!gen_huff_tables(encoder, huffman_gpu_encoder)) {
+            return -1;
+        }
+    }
 
     // Select encoder kernel which either expects continuos segments of blocks or uses block lists
     int comp_count = 1;

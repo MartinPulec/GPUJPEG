@@ -229,6 +229,8 @@ gpujpeg_encoder_suggest_restart_interval(const struct gpujpeg_image_parameters* 
 #define GPUJPEG_ENC_HDR_VAL_ADOBE    "Adobe"
 #define GPUJPEG_ENC_HDR_VAL_SPIFF    "SPIFF"
 /// @}
+/// use optimal Huffman tables: values @ref GPUJPEG_VAL_TRUE or @ref GPUJPEG_VAL_FALSE
+#define GPUJPEG_ENC_OPT_HUFF_OPTIMAL "enc_huff_optimal"
 /// set image orientation - syntax "<name>=<deg>[-]" or "help"; only if header supports (Exif, SPIFF)
 #define GPUJPEG_ENC_OPT_METADATA "enc_metadata"
 /// @{

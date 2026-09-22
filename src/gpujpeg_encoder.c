@@ -503,13 +503,13 @@ gpujpeg_encoder_encode(struct gpujpeg_encoder* encoder, const struct gpujpeg_par
     // Initialize writer output buffer current position
     encoder->writer->buffer_current = encoder->writer->buffer;
 
-    // Write header
-    gpujpeg_writer_write_header(encoder);
-
     GPUJPEG_CUSTOM_TIMER_STOP(coder->duration_dct_quantization, coder->param.perf_stats, coder->stream, return -1);
 
     // Perform huffman coding on CPU (when restart interval is not set)
     if ( coder->param.restart_interval == 0 ) {
+        // Write header (before actual Huff encode because it writes directy to JPEG file)
+        gpujpeg_writer_write_header(encoder);
+
         GPUJPEG_CUSTOM_TIMER_START(coder->duration_memory_from, coder->param.perf_stats, coder->stream, return -1);
         if (coder->data_quantized == NULL) {
             if (gpujpeg_coder_allocate_cpu_huffman_buf(coder) != 0) {
@@ -541,6 +541,9 @@ gpujpeg_encoder_encode(struct gpujpeg_encoder* encoder, const struct gpujpeg_par
             fprintf(stderr, "[GPUJPEG] [Error] Huffman encoder on GPU failed!\n");
             return -1;
         }
+
+        // Write header (if using optimized Huffman, needs to be after Huff enc to store computed tables)
+        gpujpeg_writer_write_header(encoder);
 
         GPUJPEG_CUSTOM_TIMER_STOP(coder->duration_huffman_coder, coder->param.perf_stats, coder->stream, return -1);
         GPUJPEG_CUSTOM_TIMER_STOP(coder->duration_in_gpu, coder->param.perf_stats, coder->stream, return -1);
@@ -767,6 +770,9 @@ gpujpeg_encoder_set_option(struct gpujpeg_encoder* encoder, const char *opt, con
     }
     if ( strcmp(opt, GPUJPEG_ENC_OPT_METADATA) == 0 ) {
         return add_metadata(&encoder->writer->metadata, val);
+    }
+    if ( strcmp(opt, GPUJPEG_ENC_OPT_HUFF_OPTIMAL) == 0 ) {
+        return gpujpeg_parse_bool_opt(&encoder->optimize_huffman, val, GPUJPEG_ENC_OPT_HUFF_OPTIMAL);
     }
     ERROR_MSG("Invalid encoder option: %s!\n", opt);
     return GPUJPEG_ERROR;

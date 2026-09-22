@@ -1,6 +1,6 @@
 /**
  * @file
- * Copyright (c) 2011-2023, CESNET z.s.p.o
+ * Copyright (c) 2011-2026, CESNET z.s.p.o
  * Copyright (c) 2011, Silicon Genome, LLC.
  *
  * All rights reserved.
@@ -201,6 +201,9 @@ gpujpeg_table_huffman_decoder_init(struct gpujpeg_table_huffman_decoder* table, 
  */
 void
 gpujpeg_table_huffman_decoder_compute(struct gpujpeg_table_huffman_decoder* table);
+
+void
+gpujpeg_table_huffman_encoder_compute(struct gpujpeg_table_huffman_encoder* table);
 
 #ifdef __cplusplus
 }

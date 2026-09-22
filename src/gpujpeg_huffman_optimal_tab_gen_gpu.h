@@ -1,7 +1,6 @@
 /**
  * @file
- * Copyright (c) 2011-2026, CESNET
- * Copyright (c) 2011, Silicon Genome, LLC.
+ * Copyright (c) 2026, CESNET z.s.p.o
  *
  * All rights reserved.
  *
@@ -28,46 +27,27 @@
  * POSSIBILITY OF SUCH DAMAGE.
  */
 
-#ifndef GPUJPEG_ENCODER_INTERNAL_H
-#define GPUJPEG_ENCODER_INTERNAL_H
+#ifndef GPUJPEG_OPTIMAL_HUFFMAN_TAB_GEN_GPU_H
+#define GPUJPEG_OPTIMAL_HUFFMAN_TAB_GEN_GPU_H
 
-#include "../libgpujpeg/gpujpeg_common.h"
-#include "../libgpujpeg/gpujpeg_encoder.h"
-#include "gpujpeg_common_internal.h"
-#include "gpujpeg_table.h"
-#include "gpujpeg_writer.h"
+struct gpujpeg_encoder;
 
 #ifdef __cplusplus
 extern "C" {
 #endif
 
-struct gpujpeg_huffman_gpu_encoder;
+struct gpujpeg_huffman_optimal_tab_gen *
+gpujpeg_huffman_optimal_tab_gpu_create();
 
-struct gpujpeg_encoder
-{
-    /// JPEG coder structure
-    struct gpujpeg_coder coder;
+void
+gpujpeg_huffman_optimal_tab_gpu_destroy(struct gpujpeg_huffman_optimal_tab_gen* huffman_optimized);
 
-    /// JPEG writer structure
-    struct gpujpeg_writer* writer;
-
-    /// Quantization tables
-    struct gpujpeg_table_quantization table_quantization[GPUJPEG_COMPONENT_TYPE_COUNT];
-
-    /// Huffman coder tables
-    struct gpujpeg_table_huffman_encoder table_huffman[GPUJPEG_COMPONENT_TYPE_COUNT][GPUJPEG_HUFFMAN_TYPE_COUNT];
-
-    /// Huffman GPU encoder
-    struct gpujpeg_huffman_gpu_encoder * huffman_gpu_encoder;
-
-    /// JPEG header to be emitted
-    enum gpujpeg_header_type header_type;
-
-    bool optimize_huffman;
-};
+int
+gpujpeg_huffman_optimal_tab_gpu_generate(
+    struct gpujpeg_encoder* encoder, struct gpujpeg_huffman_optimal_tab_gen* huffman_optimized);
 
 #ifdef __cplusplus
 }
 #endif
 
-#endif // GPUJPEG_ENCODER_INTERNAL_H
+#endif // GPUJPEG_OPTIMAL_HUFFMAN_TAB_GEN_GPU_H
