@@ -1,6 +1,6 @@
 cmake_minimum_required(VERSION 3.10.0 FATAL_ERROR)
 # change version also in configure.ac
-project(gpujpeg VERSION 0.27.13 LANGUAGES C CUDA)
+project(gpujpeg VERSION 0.27.14 LANGUAGES C CUDA)
 
 # options
 set(BUILD_OPENGL OFF CACHE STRING "Build with OpenGL support, options are: AUTO ON OFF")
@@ -39,6 +39,7 @@ if(NOT CMAKE_BUILD_TYPE AND NOT CMAKE_CONFIGURATION_TYPES)
     endif()
 endif()
 
+add_compile_definitions($<$<CONFIG:Debug>:DEBUG_TIMER>)
 cmake_policy(SET CMP0010 NEW) # error on undefined variable
 
 set(CPACK_PACKAGE_INSTALL_DIRECTORY "gpujpeg") # may be removed when version will be explicitly defined

@@ -1,6 +1,6 @@
 AC_PREREQ([2.65])
 # change version also in CMakeLists.txt
-AC_INIT([libgpujpeg],[0.27.13],[https://github.com/CESNET/GPUJPEG/issues],[libgpujpeg],[https://github.com/CESNET/GPUJPEG])
+AC_INIT([libgpujpeg],[0.27.14],[https://github.com/CESNET/GPUJPEG/issues],[libgpujpeg],[https://github.com/CESNET/GPUJPEG])
 AC_CONFIG_MACRO_DIR([m4])
 AC_CONFIG_SRCDIR([src/main.c])
 AC_CONFIG_AUX_DIR([.])
@@ -147,11 +147,13 @@ if test $enable_osx_universal = yes; then
 		build/universal/gpujpeg_postprocessor.o \
 		build/universal/gpujpeg_preprocessor.o \
 		build/universal/gpujpeg_huffman_gpu_decoder.o"
+		build/universal/gpujpeg_optimized_huffman_gpu.o"
 	CUDA_FLAGS="$CUDA_FLAGS -Xcompiler -Wno-error=unused-command-line-argument-hard-error-in-future"
 else
 	LIBGPUJPEG_CUDA_OBJS=" \
 		src/gpujpeg_huffman_gpu_encoder.cu.o \
 		src/gpujpeg_dct_gpu.cu.o \
+		src/gpujpeg_optimized_huffman_gpu.o"
 		src/gpujpeg_postprocessor.cu.o \
 		src/gpujpeg_preprocessor.cu.o \
 		src/gpujpeg_huffman_gpu_decoder.cu.o"

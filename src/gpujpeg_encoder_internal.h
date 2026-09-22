@@ -1,6 +1,6 @@
 /**
  * @file
- * Copyright (c) 2011-2025, CESNET
+ * Copyright (c) 2011-2026, CESNET
  * Copyright (c) 2011, Silicon Genome, LLC.
  *
  * All rights reserved.
@@ -62,6 +62,8 @@ struct gpujpeg_encoder
 
     /// JPEG header to be emitted
     enum gpujpeg_header_type header_type;
+
+    bool optimize_huffman;
 };
 
 #ifdef __cplusplus

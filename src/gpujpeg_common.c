@@ -2145,6 +2145,7 @@ int gpujpeg_pixel_format_is_planar(enum gpujpeg_pixel_format pixel_format)
 }
 
 /**
+ * @returns (stop-start) difference in milliseconds
  * @retval >=0 on success
  * @retval  <0 on failure
  */
