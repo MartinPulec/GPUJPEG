@@ -1,6 +1,6 @@
 /**
  * @file
- * Copyright (c) 2011-2025, CESNET z.s.p.o
+ * Copyright (c) 2011-2026, CESNET z.s.p.o
  * Copyright (c) 2011, Silicon Genome, LLC.
  *
  * All rights reserved.
@@ -208,28 +208,6 @@ GPUJPEG_API int
 gpujpeg_encoder_suggest_restart_interval(const struct gpujpeg_image_parameters* param_image,
                                          gpujpeg_sampling_factor_t subsampling, bool interleaved, int verbose);
 
-#define GPUJPEG_ENCODER_OPT_OUT_PINNED  "enc_out_pinned" ///< deprecated - use GPUJPEG_ENC_OPT_OUT
-/// location of buffer returned from gpujpeg_encoder_encode()
-#define GPUJPEG_ENC_OPT_OUT          "enc_opt_out"
-#define GPUJPEG_ENC_OUT_VAL_PAGEABLE "enc_out_val_pageable"  ///< default
-#define GPUJPEG_ENC_OUT_VAL_PINNED   "enc_out_val_pinned"
-
-#define GPUJPEG_ENC_OPT_HDR          "enc_hdr"
-/// @defgroup enc_hdr_types
-/// @{
-#define GPUJPEG_ENC_HDR_VAL_JFIF     "JFIF"
-#define GPUJPEG_ENC_HDR_VAL_EXIF     "Exif"
-#define GPUJPEG_ENC_HDR_VAL_ADOBE    "Adobe"
-#define GPUJPEG_ENC_HDR_VAL_SPIFF    "SPIFF"
-/// @}
-
-/// input image is vertically flipped (bottom-up): values @ref GPUJPEG_VAL_TRUE or @ref GPUJPEG_VAL_FALSE
-#define GPUJPEG_ENC_OPT_FLIPPED_BOOL "enc_opt_flipped"
-/// custom exif tag in format <key>:TYPE=<value>
-#define GPUJPEG_ENC_OPT_EXIF_TAG "enc_exif_tag"
-/// set image orientation - syntax "<name>=<deg>[-]" or "help"; only if header supports (Exif, SPIFF)
-#define GPUJPEG_ENC_OPT_METADATA "enc_metadata"
-
 /**
  * remap channel order
  *
@@ -240,9 +218,29 @@ gpujpeg_encoder_suggest_restart_interval(const struct gpujpeg_image_parameters* 
  * Letters 'Z' or 'F' can be used instead of indices to fill given output channel with zeros or all-ones.
  */
 #define GPUJPEG_ENC_OPT_CHANNEL_REMAP "enc_opt_channel_remap"
-
+/// custom exif tag in format <key>:TYPE=<value>
+#define GPUJPEG_ENC_OPT_EXIF_TAG "enc_exif_tag"
+/// input image is vertically flipped (bottom-up): values @ref GPUJPEG_VAL_TRUE or @ref GPUJPEG_VAL_FALSE
+#define GPUJPEG_ENC_OPT_FLIPPED_BOOL "enc_opt_flipped"
+/// @{
+#define GPUJPEG_ENC_OPT_HDR          "enc_hdr"
+#define GPUJPEG_ENC_HDR_VAL_JFIF     "JFIF"
+#define GPUJPEG_ENC_HDR_VAL_EXIF     "Exif"
+#define GPUJPEG_ENC_HDR_VAL_ADOBE    "Adobe"
+#define GPUJPEG_ENC_HDR_VAL_SPIFF    "SPIFF"
+/// @}
+/// set image orientation - syntax "<name>=<deg>[-]" or "help"; only if header supports (Exif, SPIFF)
+#define GPUJPEG_ENC_OPT_METADATA "enc_metadata"
+/// @{
+/// location of buffer returned from gpujpeg_encoder_encode()
+#define GPUJPEG_ENC_OPT_OUT          "enc_opt_out"
+#define GPUJPEG_ENC_OUT_VAL_PAGEABLE "enc_out_val_pageable"  ///< default
+#define GPUJPEG_ENC_OUT_VAL_PINNED   "enc_out_val_pinned"
+/// @}
 /**
  * sets encoder option
+ * @param opt  one of GPUJPEG_ENC_OPT_*
+ * @param val  value defined by the opt documentation
  * @retval GPUJPEG_NOERR  option was sucessfully set
  * @retval GPUJPEG_ERROR  invalid argument passed
  */
