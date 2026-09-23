@@ -1,6 +1,6 @@
 /**
  * @file
- * Copyright (c) 2011-2025, CESNET
+ * Copyright (c) 2011-2026, CESNET
  * Copyright (c) 2011, Silicon Genome, LLC.
  *
  * All rights reserved.
@@ -745,15 +745,6 @@ gpujpeg_encoder_set_option(struct gpujpeg_encoder* encoder, const char *opt, con
             return GPUJPEG_ERROR;
         }
         encoder->writer->buffer_pinned = strcmp(val, GPUJPEG_ENC_OUT_VAL_PINNED) == 0;
-        return GPUJPEG_NOERR;
-    }
-    if ( strcmp(opt, GPUJPEG_ENCODER_OPT_OUT_PINNED) == 0 ) {
-        WARN_MSG("deprecated, use GPUJPEG_ENC_OUT_VAL_PAGEABLE (" GPUJPEG_ENC_OUT_VAL_PAGEABLE ") instead!\n");
-        if ( strcmp(val, GPUJPEG_VAL_TRUE) != 0 && strcmp(val, GPUJPEG_VAL_FALSE) != 0 ) {
-            ERROR_MSG("Unexpeceted value %s for " GPUJPEG_ENCODER_OPT_OUT_PINNED "\n", val);
-            return GPUJPEG_ERROR;
-        }
-        encoder->writer->buffer_pinned = strcmp(val, GPUJPEG_VAL_TRUE) == 0;
         return GPUJPEG_NOERR;
     }
     if ( strcmp(opt, GPUJPEG_ENC_OPT_HDR) == 0 ) {
