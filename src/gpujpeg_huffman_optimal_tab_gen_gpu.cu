@@ -77,13 +77,18 @@
  * ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
  * POSSIBILITY OF SUCH DAMAGE.
  */
- /**
-  * Idea of this file comes from batchelor thesis of Patrik Radiměřský (2026),
-  * although its code isn't used directly (jpeg_gen_optimal_table taken directly
-  * from libjpeg-turbo; symbol couting was adapted from gpujpeg_huffman_gpu_encoder
-  * because there it maps directly to the representation of GPUJPEG - restart
-  * intervals, non-/interleaved. Also there is optimized cc>=2.0 variant).
-  */
+/**
+ * Idea of this file comes from batchelor thesis of Patrik Radiměřský (2026),
+ * although its code isn't used directly (jpeg_gen_optimal_table taken directly
+ * from libjpeg-turbo; symbol couting was adapted from gpujpeg_huffman_gpu_encoder
+ * because there it maps directly to the representation of GPUJPEG - restart
+ * intervals, non-/interleaved. Also there is optimized cc>=2.0 variant).
+ *
+ * @todo
+ * it could be also possible to store the input symbols for Huffman and
+ * then the actuall Huffman encode would need to do less work then. Currently
+ * the output is used just to count frequencies and otherwise discareded.
+ */
 
 #include "gpujpeg_common_internal.h"
 #include "gpujpeg_encoder_internal.h"
@@ -100,6 +105,7 @@ struct gpujpeg_huffman_optimal_tab_gen
 {
     /** Size of occupied part of output buffer */
     int* freqs; // 256 * (luma DC, luma AC, chroma DC, chroma AC)
+    struct gpujpeg_timer kernel_duration;
 };
 
 // Threadblock size for CC 1.x kernel
@@ -116,7 +122,7 @@ gpujpeg_huffman_gpu_encoder_count_code(unsigned int code, int* table)
  *
  * destilled from gpujpeg_huffman_gpu_encoder_encode_block() for CC 1.x
  */
-__device__ static int
+__device__ static void
 gpujpeg_huffman_gpu_comp_freq_block_cc10(int& dc, int16_t* data, int* d_freq_dc, int* d_freq_ac)
 {
     typedef uint64_t loading_t;
@@ -180,8 +186,6 @@ gpujpeg_huffman_gpu_comp_freq_block_cc10(int& dc, int16_t* data, int* d_freq_dc,
     if ( r > 0 ) {
         gpujpeg_huffman_gpu_encoder_count_code(0, d_freq_ac);
     }
-
-    return 0;
 }
 
 /**
@@ -298,9 +302,8 @@ gpujpeg_huffman_count_freqs_cc10(
  *
  * destilled from gpujpeg_huffman_gpu_encoder_encode_block() for CC 2.0
  */
-__device__ static int
-gpujpeg_huffman_gpu_comp_freq_block_cc20(const int16_t* block, unsigned int* const s_out, const int last_dc_idx,
-                                         int tid, int* freq_dc, int* freq_ac)
+__device__ static void
+gpujpeg_huffman_gpu_comp_freq_block_cc20(const int16_t* block, int& dc, int tid, int* freq_dc, int* freq_ac)
 {
     // each thread loads a pair of values (pair after zigzag reordering)
     const int load_idx = tid * 2;
@@ -344,8 +347,8 @@ gpujpeg_huffman_gpu_comp_freq_block_cc20(const int16_t* block, unsigned int* con
 
         // update last DC coefficient (saved at the special place at the end of the shared bufer)
         const int original_in_even = in_even;
-        in_even -= ((int*)s_out)[last_dc_idx];
-        ((int*)s_out)[last_dc_idx] = original_in_even;
+        in_even -= dc;
+        dc = original_in_even;
     }
 
     int temp = in_even < 0 ? -in_even : in_even;
@@ -369,9 +372,6 @@ gpujpeg_huffman_gpu_comp_freq_block_cc20(const int16_t* block, unsigned int* con
         int val_odd = zeros_before_odd << 4 | nbits;
         gpujpeg_huffman_gpu_encoder_count_code(val_odd, freq_ac);
     }
-
-    // nothing to fail here
-    return 0;
 }
 #endif
 /**
@@ -393,17 +393,19 @@ gpujpeg_huffman_count_freqs_cc20(
     int *d_freqs
 ) {
 #if __CUDA_ARCH__ >= 200
-    int* d_freq_dc_luma = d_freqs;
-    int* d_freq_ac_luma = d_freqs + 257;
-    int* d_freq_dc_chroma = d_freqs + 2 * 257;
-    int* d_freq_ac_chroma = d_freqs + 3 * 257;
-
     int warpidx = threadIdx.x >> 5;
     int tid = threadIdx.x & 31;
 
-    enum { extradata = (GPUJPEG_MAX_COMPONENT_COUNT + (sizeof(int) - 1)) / sizeof(int) };
-    __shared__ uint4 s_out_all[(64 + extradata) * WARPS_NUM];
-    unsigned int * s_out = (unsigned int*)(s_out_all + warpidx * (64 + 1));
+    __shared__ int s_freq_dc_luma[256];
+    __shared__ int s_freq_ac_luma[256];
+    __shared__ int s_freq_dc_chroma[256];
+    __shared__ int s_freq_ac_chroma[256];
+    static_assert(WARPS_NUM * 32 == 256, "256 threads needed to clear smem");
+    s_freq_dc_luma[threadIdx.x] = 0;
+    s_freq_ac_luma[threadIdx.x] = 0;
+    s_freq_dc_chroma[threadIdx.x] = 0;
+    s_freq_ac_chroma[threadIdx.x] = 0;
+    __syncthreads();
 
     // Select Segment
     const int block_idx = blockIdx.x + blockIdx.y * gridDim.x;
@@ -420,8 +422,10 @@ gpujpeg_huffman_count_freqs_cc20(
     struct gpujpeg_segment* segment = &d_segment[segment_index];
 
     // Initialize last DC coefficients
-    if(tid < GPUJPEG_MAX_COMPONENT_COUNT) {
-        s_out[256 + tid] = 0;
+    __shared__ int s_dc_all[GPUJPEG_MAX_COMPONENT_COUNT * WARPS_NUM];
+    int* s_dc = (int*)(s_dc_all + warpidx * GPUJPEG_MAX_COMPONENT_COUNT);
+    if ( tid < GPUJPEG_MAX_COMPONENT_COUNT ) {
+        s_dc[tid] = 0;
     }
 
     // Prepare data pointers
@@ -443,13 +447,16 @@ gpujpeg_huffman_count_freqs_cc20(
         const int16_t* block = component->d_data_quantized + (segment->scan_segment_index * component->segment_mcu_count) * comp_mcu_size;
 
         // Get huffman table offset
-        int* freq_dc = component->type == GPUJPEG_COMPONENT_LUMINANCE ? d_freq_dc_luma : d_freq_dc_chroma;
-        int* freq_ac = component->type == GPUJPEG_COMPONENT_LUMINANCE ? d_freq_ac_luma : d_freq_ac_chroma;
+        int* freq_dc = component->type == GPUJPEG_COMPONENT_LUMINANCE ? s_freq_dc_luma : s_freq_dc_chroma;
+        int* freq_ac = component->type == GPUJPEG_COMPONENT_LUMINANCE ? s_freq_ac_luma : s_freq_ac_chroma;
 
         // Encode MCUs in segment
         for (int block_count = segment->mcu_count; block_count--;) {
+            // Get coder parameters
+            int & component_dc = s_dc[segment->scan_index];
+
             // Encode 8x8 block
-            gpujpeg_huffman_gpu_comp_freq_block_cc20(block, s_out, 256, tid, freq_dc, freq_ac);
+            gpujpeg_huffman_gpu_comp_freq_block_cc20(block, component_dc, tid, freq_dc, freq_ac);
 
             // Advance to next block
             block += comp_mcu_size;
@@ -464,19 +471,28 @@ gpujpeg_huffman_count_freqs_cc20(
             const uint64_t packed_block_info = *(packed_block_info_ptr++);
 
             // Get coder parameters
-            const int last_dc_idx = 256 + (packed_block_info & 0x7f);
+            int & component_dc = s_dc[packed_block_info & 0x7f];
 
             // Get offset to right part of huffman table
-            int* freq_dc = packed_block_info & 0x80 ? d_freq_dc_chroma : d_freq_dc_luma;
-            int* freq_ac = packed_block_info & 0x80 ? d_freq_ac_chroma : d_freq_ac_luma;
+            int* freq_dc = packed_block_info & 0x80 ? s_freq_dc_chroma : s_freq_dc_luma;
+            int* freq_ac = packed_block_info & 0x80 ? s_freq_ac_chroma : s_freq_ac_luma;
 
             // Source data pointer
             int16_t* block = &d_data_quantized[packed_block_info >> 8];
 
             // Encode 8x8 block
-            gpujpeg_huffman_gpu_comp_freq_block_cc20(block, s_out, last_dc_idx, tid, freq_dc, freq_ac);
+            gpujpeg_huffman_gpu_comp_freq_block_cc20(block, component_dc, tid, freq_dc, freq_ac);
         }
     }
+    __syncthreads();
+    int* d_freq_dc_luma = d_freqs;
+    int* d_freq_ac_luma = d_freqs + 257;
+    int* d_freq_dc_chroma = d_freqs + 2 * 257;
+    int* d_freq_ac_chroma = d_freqs + 3 * 257;
+    atomicAdd(&d_freq_dc_luma[threadIdx.x], s_freq_dc_luma[threadIdx.x]);
+    atomicAdd(&d_freq_ac_luma[threadIdx.x], s_freq_ac_luma[threadIdx.x]);
+    atomicAdd(&d_freq_dc_chroma[threadIdx.x], s_freq_dc_chroma[threadIdx.x]);
+    atomicAdd(&d_freq_ac_chroma[threadIdx.x], s_freq_ac_chroma[threadIdx.x]);
 #endif // #if __CUDA_ARCH__ >= 200
 }
 
@@ -495,11 +511,13 @@ gpujpeg_huffman_optimal_tab_gpu_create() {
         cudaMemcpyHostToDevice
     );
     gpujpeg_cuda_check_error("Huffman encoder init (natural order copy)", return NULL);
+    GPUJPEG_CUSTOM_TIMER_CREATE(huffman_optimized->kernel_duration, return NULL);
     // Configure more shared memory for all kernels
     cudaFuncSetCacheConfig(gpujpeg_huffman_count_freqs_cc20<true>, cudaFuncCachePreferShared);
     cudaFuncSetCacheConfig(gpujpeg_huffman_count_freqs_cc20<false>, cudaFuncCachePreferShared);
 
     cudaMalloc(&huffman_optimized->freqs, 4 * sizeof(int) * 257);
+
 
     return huffman_optimized;
 }
@@ -512,6 +530,7 @@ gpujpeg_huffman_optimal_tab_gpu_destroy(struct gpujpeg_huffman_optimal_tab_gen* 
     if ( huffman_optimized->freqs ) {
         cudaFree(huffman_optimized->freqs);
     }
+    GPUJPEG_CUSTOM_TIMER_DESTROY(huffman_optimized->kernel_duration, );
     free(huffman_optimized);
 }
 
@@ -710,6 +729,7 @@ gpujpeg_huffman_optimal_tab_gpu_generate(
 
     cudaMemsetAsync(huffman_optimized->freqs, 0, 4 * 257 * sizeof(int), coder->stream);
 
+    // GPUJPEG_CUSTOM_TIMER_START(huffman_optimized->kernel_duration, 1, coder->stream, );
     // Run kernel
     if ( encoder->coder.cuda_cc_major < 2 ) {
         dim3 thread(THREAD_BLOCK_SIZE);
@@ -734,6 +754,8 @@ gpujpeg_huffman_optimal_tab_gpu_generate(
         }
     }
     gpujpeg_cuda_check_error("Computing Huffman frequencies failed", return -1);
+    // GPUJPEG_CUSTOM_TIMER_STOP(huffman_optimized->kernel_duration, 1, coder->stream, );
+    // printf("%f ms\n", GPUJPEG_CUSTOM_TIMER_DURATION(huffman_optimized->kernel_duration));
 
     int freqs[4 * 257];
     cudaMemcpyAsync(freqs, huffman_optimized->freqs, 4 * 257 * sizeof(int), cudaMemcpyDefault, coder->stream);
