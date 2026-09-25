@@ -373,39 +373,21 @@ gpujpeg_huffman_gpu_comp_freq_block_cc20(const int16_t* block, int& dc, int tid,
         gpujpeg_huffman_gpu_encoder_count_code(val_odd, freq_ac);
     }
 }
-#endif
-/**
- * Computation of input Huffman symbols (DC diffs, RRRRSSSS for AC) freqencies (For compute capability >= 2.0)
- *
- * derived from gpujpeg_huffman_encoder_encode_kernel_warp() in gpujpeg_huffman_gpu_encoder.cu
- */
 template <bool CONTINUOUS_BLOCK_LIST>
-#if __CUDA_ARCH__ >= 200
-__launch_bounds__(WARPS_NUM * 32, 1024 / (WARPS_NUM * 32))
-#endif
-__global__ static void
-gpujpeg_huffman_count_freqs_cc20(
+__device__ static void
+gpujpeg_huffman_count_freqs_cc20_real(
     struct gpujpeg_component* d_component,
     struct gpujpeg_segment* d_segment,
     int segment_count,
     const uint64_t* const d_block_list,
     int16_t* const d_data_quantized,
-    int *d_freqs
+    int *s_freq_dc_luma,
+    int *s_freq_ac_luma,
+    int *s_freq_dc_chroma,
+    int *s_freq_ac_chroma
 ) {
-#if __CUDA_ARCH__ >= 200
     int warpidx = threadIdx.x >> 5;
     int tid = threadIdx.x & 31;
-
-    __shared__ int s_freq_dc_luma[256];
-    __shared__ int s_freq_ac_luma[256];
-    __shared__ int s_freq_dc_chroma[256];
-    __shared__ int s_freq_ac_chroma[256];
-    static_assert(WARPS_NUM * 32 == 256, "256 threads needed to clear smem");
-    s_freq_dc_luma[threadIdx.x] = 0;
-    s_freq_ac_luma[threadIdx.x] = 0;
-    s_freq_dc_chroma[threadIdx.x] = 0;
-    s_freq_ac_chroma[threadIdx.x] = 0;
-    __syncthreads();
 
     // Select Segment
     const int block_idx = blockIdx.x + blockIdx.y * gridDim.x;
@@ -484,6 +466,44 @@ gpujpeg_huffman_count_freqs_cc20(
             gpujpeg_huffman_gpu_comp_freq_block_cc20(block, component_dc, tid, freq_dc, freq_ac);
         }
     }
+}
+#endif // #if __CUDA_ARCH__ >= 200
+
+/**
+ * Computation of input Huffman symbols (DC diffs, RRRRSSSS for AC) freqencies (For compute capability >= 2.0)
+ *
+ * derived from gpujpeg_huffman_encoder_encode_kernel_warp() in gpujpeg_huffman_gpu_encoder.cu
+ */
+template <bool CONTINUOUS_BLOCK_LIST>
+#if __CUDA_ARCH__ >= 200
+__launch_bounds__(WARPS_NUM * 32, 1024 / (WARPS_NUM * 32))
+#endif
+__global__ static void
+gpujpeg_huffman_count_freqs_cc20(
+    struct gpujpeg_component* d_component,
+    struct gpujpeg_segment* d_segment,
+    int segment_count,
+    const uint64_t* const d_block_list,
+    int16_t* const d_data_quantized,
+    int *d_freqs
+) {
+    __shared__ int s_freq_dc_luma[256];
+    __shared__ int s_freq_ac_luma[256];
+    __shared__ int s_freq_dc_chroma[256];
+    __shared__ int s_freq_ac_chroma[256];
+    static_assert(WARPS_NUM * 32 == 256, "256 threads needed to clear smem");
+    s_freq_dc_luma[threadIdx.x] = 0;
+    s_freq_ac_luma[threadIdx.x] = 0;
+    s_freq_dc_chroma[threadIdx.x] = 0;
+    s_freq_ac_chroma[threadIdx.x] = 0;
+    __syncthreads();
+
+#if __CUDA_ARCH__ >= 200
+    gpujpeg_huffman_count_freqs_cc20_real<CONTINUOUS_BLOCK_LIST>(d_component, d_segment, segment_count, d_block_list,
+                                                                 d_data_quantized, s_freq_dc_luma, s_freq_ac_luma,
+                                                                 s_freq_dc_chroma, s_freq_ac_chroma);
+#endif // #if __CUDA_ARCH__ >= 200
+
     __syncthreads();
     int* d_freq_dc_luma = d_freqs;
     int* d_freq_ac_luma = d_freqs + 257;
@@ -493,10 +513,7 @@ gpujpeg_huffman_count_freqs_cc20(
     atomicAdd(&d_freq_ac_luma[threadIdx.x], s_freq_ac_luma[threadIdx.x]);
     atomicAdd(&d_freq_dc_chroma[threadIdx.x], s_freq_dc_chroma[threadIdx.x]);
     atomicAdd(&d_freq_ac_chroma[threadIdx.x], s_freq_ac_chroma[threadIdx.x]);
-#endif // #if __CUDA_ARCH__ >= 200
 }
-
-
 
 struct gpujpeg_huffman_optimal_tab_gen *
 gpujpeg_huffman_optimal_tab_gpu_create() {
