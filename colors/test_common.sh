@@ -54,7 +54,7 @@ fi
 
 # Display Left/Right Diff of the Original and the Processed Image
 #$DIR/display_diff.sh $DIR/$NAME.rgb $DIR/$NAME.decoded.rgb
-if ! magick_compare "$DIR/$NAME.rgb" "$DIR/$NAME.decoded.rgb" \
+if ! magick_compare "$TMPDIR/$NAME.rgb" "$TMPDIR/$NAME.decoded.rgb" \
         '-depth 8 -size 1920x1080' "$REQUESTED_PSNR"; then
         exit 1
 fi
