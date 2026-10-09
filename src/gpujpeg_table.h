@@ -31,7 +31,7 @@
 #ifndef GPUJPEG_TABLE_H
 #define GPUJPEG_TABLE_H
 
-#include "../libgpujpeg/gpujpeg_type.h"
+#include "gpujpeg_common_internal.h"
 
 #ifdef __cplusplus
 extern "C" {
