@@ -519,7 +519,7 @@ gpujpeg_huffman_optimal_tab_gpu_generate(
     // Get coder
     struct gpujpeg_coder* coder = &encoder->coder;
 
-    assert(coder->param.restart_interval > 0);
+    // assert(coder->param.restart_interval > 0);
 
     // Select encoder kernel which either expects continuos segments of blocks or uses block lists
     int comp_count = 1;

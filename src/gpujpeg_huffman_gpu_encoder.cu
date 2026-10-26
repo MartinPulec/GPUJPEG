@@ -29,7 +29,6 @@
  */
 
 #include "gpujpeg_huffman_gpu_encoder.h"
-#include "gpujpeg_huffman_optimal_tab_gen_gpu.h"
 #include "gpujpeg_marker.h"
 #include "gpujpeg_util.h"
 
@@ -61,8 +60,6 @@ struct gpujpeg_huffman_gpu_encoder
 {
     /** Size of occupied part of output buffer */
     unsigned int * d_gpujpeg_huffman_output_byte_count;
-
-    struct gpujpeg_huffman_optimal_tab_gen *huffman_optimized;
 };
 
 /**
@@ -1047,8 +1044,6 @@ gpujpeg_huffman_gpu_encoder_destroy(struct gpujpeg_huffman_gpu_encoder * huffman
         cudaFree(huffman_gpu_encoder->d_gpujpeg_huffman_output_byte_count);
     }
 
-    gpujpeg_huffman_optimal_tab_gpu_destroy(huffman_gpu_encoder->huffman_optimized);
-
     free(huffman_gpu_encoder);
 }
 
@@ -1074,16 +1069,9 @@ gpujpeg_huffman_gpu_encoder_grid_size(int tblock_count)
 
 /// used just if encoder->optimize_huffman == true
 static bool
-gen_upload_optimal_huff_tables(struct gpujpeg_encoder* encoder, struct gpujpeg_huffman_gpu_encoder* huffman_gpu_encoder)
+upload_optimal_huff_tables(struct gpujpeg_encoder* encoder)
 {
     struct gpujpeg_coder* coder = &encoder->coder;
-    if ( huffman_gpu_encoder->huffman_optimized == nullptr ) {
-        huffman_gpu_encoder->huffman_optimized = gpujpeg_huffman_optimal_tab_gpu_create();
-    }
-
-    if ( gpujpeg_huffman_optimal_tab_gpu_generate(encoder, huffman_gpu_encoder->huffman_optimized) != 0 ) {
-        return false;
-    }
     // Copy Huffman coding tables to GPU memory (for CC 1.x)
     if ( encoder->coder.cuda_cc_major < 2 ) {
         cudaMemcpyToSymbolAsync(gpujpeg_huffman_gpu_encoder_table_huffman,
@@ -1114,10 +1102,8 @@ gpujpeg_huffman_gpu_encoder_encode(struct gpujpeg_encoder* encoder, struct gpujp
 
     assert(coder->param.restart_interval > 0);
 
-    if ( encoder->optimize_huffman ) {
-        if (!gen_upload_optimal_huff_tables(encoder, huffman_gpu_encoder)) {
-            return -1;
-        }
+    if ( encoder->optimize_huffman && !upload_optimal_huff_tables(encoder) ) {
+        return -1;
     }
 
     // Select encoder kernel which either expects continuos segments of blocks or uses block lists

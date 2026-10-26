@@ -46,6 +46,7 @@
 #include "gpujpeg_exif.h"
 #include "gpujpeg_huffman_cpu_encoder.h"
 #include "gpujpeg_huffman_gpu_encoder.h"
+#include "gpujpeg_huffman_optimal_tab_gen_gpu.h"
 #include "gpujpeg_marker.h"
 #include "gpujpeg_util.h"
 
@@ -495,18 +496,26 @@ gpujpeg_encoder_encode(struct gpujpeg_encoder* encoder, const struct gpujpeg_par
         return -1;
     }
 
-    // If restart interval is 0 then the GPU processing is in the end (even huffman coder will be performed on CPU)
-    if (coder->param.restart_interval == 0) {
-        GPUJPEG_CUSTOM_TIMER_STOP(coder->duration_in_gpu, coder->param.perf_stats, coder->stream, return -1);
-    }
-
     // Initialize writer output buffer current position
     encoder->writer->buffer_current = encoder->writer->buffer;
 
     GPUJPEG_CUSTOM_TIMER_STOP(coder->duration_dct_quantization, coder->param.perf_stats, coder->stream, return -1);
 
+    if ( encoder->optimize_huffman ) {
+        if ( encoder->huffman_optimize_state == NULL ) {
+            if ( (encoder->huffman_optimize_state = gpujpeg_huffman_optimal_tab_gpu_create()) == NULL ) {
+                return -1;
+            }
+        }
+        if ( (rc = gpujpeg_huffman_optimal_tab_gpu_generate(encoder, encoder->huffman_optimize_state)) ) {
+            return rc;
+        }
+    }
+
     // Perform huffman coding on CPU (when restart interval is not set)
     if ( coder->param.restart_interval == 0 ) {
+        // If restart interval is 0 then the GPU processing is in the end (even huffman coder will be performed on CPU)
+        GPUJPEG_CUSTOM_TIMER_STOP(coder->duration_in_gpu, coder->param.perf_stats, coder->stream, return -1);
         GPUJPEG_CUSTOM_TIMER_START(coder->duration_memory_from, coder->param.perf_stats, coder->stream, return -1);
         if (coder->data_quantized == NULL) {
             if (gpujpeg_coder_allocate_cpu_huffman_buf(coder) != 0) {
@@ -816,6 +825,8 @@ gpujpeg_encoder_destroy(struct gpujpeg_encoder* encoder)
     if (encoder->writer != NULL) {
         gpujpeg_writer_destroy(encoder->writer);
     }
+
+    gpujpeg_huffman_optimal_tab_gpu_destroy(encoder->huffman_optimize_state);
 
     free(encoder);
 

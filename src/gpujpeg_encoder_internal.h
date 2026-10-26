@@ -42,6 +42,7 @@ extern "C" {
 #endif
 
 struct gpujpeg_huffman_gpu_encoder;
+struct gpujpeg_huffman_optimal_tab_gen;
 
 struct gpujpeg_encoder
 {
@@ -64,6 +65,7 @@ struct gpujpeg_encoder
     enum gpujpeg_header_type header_type;
 
     bool optimize_huffman;
+    struct gpujpeg_huffman_optimal_tab_gen *huffman_optimize_state;
 };
 
 #ifdef __cplusplus
