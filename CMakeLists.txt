@@ -20,6 +20,10 @@ if(WIN32)
     endif()
     string(REPLACE "\\" "/" CMAKE_INSTALL_PREFIX ${CMAKE_INSTALL_PREFIX})
     add_definitions(-D_CRT_SECURE_NO_WARNINGS)
+    add_compile_options(
+        "$<$<COMPILE_LANGUAGE:C,CXX>:/Zc:preprocessor>"
+        "$<$<COMPILE_LANGUAGE:CUDA>:-Xcompiler=/Zc:preprocessor>"
+    )
 endif()
 
 if (CMAKE_CUDA_ARCHITECTURES MATCHES OFF)
